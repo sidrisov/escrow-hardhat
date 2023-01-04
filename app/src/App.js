@@ -3,6 +3,8 @@ import { useState } from 'react';
 import deploy from './deploy';
 import Escrow from './Escrow';
 
+import { ContractState } from './ContractState';
+
 import AppBar from '@mui/material/AppBar';
 import Box from '@mui/material/Box';
 import Toolbar from '@mui/material/Toolbar';
@@ -22,8 +24,6 @@ import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogTitle from '@mui/material/DialogTitle';
-
-
 
 import AccountBalanceIcon from '@mui/icons-material/PublishedWithChanges';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
@@ -48,6 +48,44 @@ export async function approve(escrowContract, signer) {
   const approveTxn = await escrowContract.connect(signer).approve();
   await approveTxn.wait();
 }
+
+export async function validate(escrowContract, signer) {
+  const approveTxn = await escrowContract.connect(signer).validate();
+  await approveTxn.wait();
+}
+const minute = 60 * 1000;
+const hour = 60 * minute;
+const day = 24 * hour;
+const week = 7 * day;
+const month = 30 * day;
+
+const expiries = [
+  {
+    value: "-1",
+    label: "None",
+  },
+  {
+    value: minute,
+    label: "Minute",
+  },
+  {
+    value: hour,
+    label: "Hour",
+  },
+  {
+    value: day,
+    label: "Day",
+  },
+  {
+    value: week,
+    label: "Week",
+  },
+  {
+    value: month,
+    label: "Month",
+  }
+
+];
 
 function App() {
   const [escrows, setEscrows] = useState({ "arr": [] });
@@ -94,22 +132,29 @@ function App() {
   }
 
   async function newContract() {
-    const beneficiary = document.getElementById('beneficiary').value;
-    const arbiter = document.getElementById('arbiter').value;
-    const value = ethers.utils.parseEther(document.getElementById('eth').value);
-    const escrowContract = await deploy(signer, arbiter, beneficiary, value);
+    const beneficiary = document.getElementById("beneficiary").value;
+    const arbiter = document.getElementById("arbiter").value;
+    const value = ethers.utils.parseEther(document.getElementById("eth").value);
+    let expiry = parseInt(document.getElementById("expiry").value);
+
+    const escrowContract = await deploy(signer, arbiter, beneficiary, expiry === -1 ? 0 : expiry, value);
+
+    if (expiry !== -1) {
+      expiry += Date.now();
+    }
 
     const escrow = {
       address: escrowContract.address,
       arbiter,
       beneficiary,
       value: value.toString(),
-      approved: false,
+      expiry,
+      state: ContractState.Pending,
       handleApprove: async () => {
-        escrowContract.on('Approved', () => {
+        escrowContract.on("Approved", () => {
           const arr = escrows.arr.map(esc => {
             if (esc.address === escrowContract.address) {
-              esc.approved = true;
+              esc.state = ContractState.Approved;
             }
             return esc;
           });
@@ -118,6 +163,21 @@ function App() {
         });
 
         await approve(escrowContract, signer);
+      },
+      handleCheckExpiry: async () => {
+        escrowContract.on("Expired", () => {
+          const arr = escrows.arr.map(esc => {
+            if (esc.address === escrowContract.address) {
+              esc.state = ContractState.Expired;
+            }
+            return esc;
+          });
+
+          setEscrows({ ...escrows, arr });
+
+        });
+
+        await validate(escrowContract, signer);
       },
     };
 
@@ -140,7 +200,7 @@ function App() {
               <>
                 <Stack direction="row" spacing={1}>
                   <Chip label="Pending" size="small" variant="filled" color={filter.pending ? "secondary" : "info"} clickable={!filter.pending} onClick={() => { !filter.pending && filterByPending() }} />
-                  <Chip label="Approved" size="small" variant="filled" color={filter.pending ? "info" : "secondary"} clickable={filter.pending} onClick={() => { filter.pending && filterByPending() }} />
+                  <Chip label="Completed" size="small" variant="filled" color={filter.pending ? "info" : "secondary"} clickable={filter.pending} onClick={() => { filter.pending && filterByPending() }} />
 
                   <Divider orientation="vertical" flexItem sx={{ bgcolor: "white" }} />
 
@@ -184,6 +244,16 @@ function App() {
 
                   <TextField variant="standard" label="Arbiter Address" id="arbiter" />
                   <TextField variant="standard" label="Beneficiary Address" id="beneficiary" />
+                  <TextField select variant="standard" label="Expires after" id="expiry"
+                    SelectProps={{
+                      native: true,
+                    }}>
+                    {expiries.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </TextField>
                   <TextField
                     variant="standard" label="Deposit Amount"
                     id="eth" type="text"
@@ -209,7 +279,11 @@ function App() {
             </Dialog>
             <Box m={1} mt={7}>
               <Grid container>
-                {escrows.arr.filter(escrow => (filter.all || escrow.arbiter.toLowerCase() === account.toLowerCase()) && !escrow.approved === filter.pending)
+                {escrows.arr.filter(escrow =>
+                  (filter.all || escrow.arbiter.toLowerCase() === account.toLowerCase())
+                  && ((filter.pending && escrow.state === ContractState.Pending)
+                    || (!filter.pending && (escrow.state === ContractState.Approved || escrow.state === ContractState.Expired)))
+                  )
                   .map((escrow) => (
                     <Grid item key={"gridItem:" + escrow.address}>
                       <Escrow key={escrow.address} {...escrow} />
