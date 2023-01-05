@@ -1,11 +1,4 @@
-import { ethers } from 'ethers';
-import Escrow from './artifacts/contracts/Escrow.sol/Escrow';
-
-export default async function deploy(signer, arbiter, beneficiary, expiry, value) {
-  const factory = new ethers.ContractFactory(
-    Escrow.abi,
-    Escrow.bytecode,
-    signer
-  );
-  return factory.deploy(arbiter, beneficiary, expiry, { value });
+export default async function deploy(factoryContract, arbiter, beneficiary, expiry, value) {
+  const txResponse = await factoryContract.create(arbiter, beneficiary, expiry, { value });
+  await txResponse.wait();
 }

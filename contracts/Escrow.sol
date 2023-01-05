@@ -13,7 +13,7 @@ contract Escrow {
     constructor(address _arbiter, address _beneficiary, uint _expiry) payable {
         arbiter = _arbiter;
         beneficiary = _beneficiary;
-        depositor = msg.sender;
+        depositor = tx.origin;
         if (_expiry == 0) {
             expiry = 0;
         } else {
@@ -25,7 +25,7 @@ contract Escrow {
     event Expired(address);
 
     function approve() external {
-        require(msg.sender == arbiter);
+        require(tx.origin == arbiter);
         require(!isExpired);
 
         uint balance = address(this).balance;
@@ -36,16 +36,15 @@ contract Escrow {
     }
 
     function validate() external {
-        require(!isApproved);
-        require(!isExpired);
+        if (!isApproved && !isExpired) {
+            if (expiry != 0 && expiry <= 1000 * block.timestamp) {
+                uint balance = address(this).balance;
+                (bool sent, ) = payable(depositor).call{value: balance}("");
+                require(sent, "Failed to send Ether");
 
-        if (expiry != 0 && expiry <= 1000 * block.timestamp) {
-            uint balance = address(this).balance;
-            (bool sent, ) = payable(depositor).call{value: balance}("");
-            require(sent, "Failed to send Ether");
-
-            emit Expired(address(this));
-            isExpired = true;
+                emit Expired(address(this));
+                isExpired = true;
+            }
         }
     }
 }

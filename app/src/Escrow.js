@@ -74,10 +74,10 @@ export default function Escrow({
             {ethers.utils.formatEther(value)} ETH
           </Typography>
           <Typography variant="caption" color="text.primary" gutterBottom>
-            Expires after:
+            {state === ContractState.Expired ? "Expired after:" : "Expires after:"}
           </Typography>
           <Typography variant="body1" color="text.secondary" gutterBottom>
-            {expiry === -1 ? "-" : (new Date(expiry)).toLocaleString()}
+            {expiry === 0 ? "-" : (new Date(expiry)).toLocaleString()}
           </Typography>
           <Typography sx={{ mb: 1.5 }} color={stateColor(state)}>
             {stateMessage(state)}
@@ -92,7 +92,7 @@ export default function Escrow({
             <Button variant="outlined" size="small" onClick={(e) => {
               e.preventDefault();
               handleCheckExpiry();
-            }}>Verify</Button>
+            }}>Validate</Button>
           </CardActions>
         }
       </Card>

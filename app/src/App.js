@@ -1,7 +1,11 @@
 import { ethers } from 'ethers';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import deploy from './deploy';
+import deployFactory from './deployFactory';
 import Escrow from './Escrow';
+import EscrowFactoryContract from './artifacts/contracts/EscrowFactory.sol/EscrowFactory.json';
+import EscrowContract from './artifacts/contracts/Escrow.sol/Escrow';
+
 
 import { ContractState } from './ContractState';
 
@@ -53,6 +57,7 @@ export async function validate(escrowContract, signer) {
   const approveTxn = await escrowContract.connect(signer).validate();
   await approveTxn.wait();
 }
+
 const minute = 60 * 1000;
 const hour = 60 * minute;
 const day = 24 * hour;
@@ -61,7 +66,7 @@ const month = 30 * day;
 
 const expiries = [
   {
-    value: "-1",
+    value: 0,
     label: "None",
   },
   {
@@ -90,8 +95,9 @@ const expiries = [
 function App() {
   const [escrows, setEscrows] = useState({ "arr": [] });
   const [account, setAccount] = useState();
-  const [signer, setSigner] = useState();
   const [connected, setConnected] = useState(false);
+  const [factoryAddress, setFactoryAddress] = useState("0xC8Ec44A70291aCe21Bc0CBF6C2d5eCd07DF38e2D");
+  const [factoryContract, setFactoryContract] = useState();
   const [filter, setFilter] = useState({
     "pending": true,
     "all": true
@@ -107,14 +113,106 @@ function App() {
     setOpen(false);
   };
 
+  useEffect(() => {
+    if (connected) {
+      if (factoryAddress.length !== 0) {
+        const factory = new ethers.Contract(factoryAddress, EscrowFactoryContract.abi, provider.getSigner())
+        setFactoryContract(factory);
+      }
+    } else {
+      setEscrows({ "arr": [] });
+    }
+  }, [connected, factoryAddress]);
+
+  useEffect(() => {
+    (async () => {
+      if (!connected) {
+        return;
+      }
+
+      if (factoryContract) {
+        setEscrows({ "arr": [] });
+        factoryContract.on("Created", async (address) => { loadContract(address) });
+        const addresses = await factoryContract.getAddresses();
+        if (addresses.length > 0) {
+          for (let i = 0; i < addresses.length; i++) {
+            loadContract(addresses[i]);
+          }
+        }
+      }
+    })()
+  }, [connected, factoryContract]);
+
   async function connectWallet() {
     const accounts = await provider.send('eth_requestAccounts', []);
 
     if (accounts.length !== 0) {
       setAccount(accounts[0]);
-      setSigner(provider.getSigner());
+
+      if (factoryAddress.length === 0) {
+        const address = (await deployFactory(provider.getSigner())).address;
+        console.log("Escrow Factory Contract Address: ", address);
+        setFactoryAddress(address);
+      }
+
       setConnected(true);
     }
+  }
+
+  async function loadContract(address) {
+    console.log("lodaing contract: ", address);
+
+    const escrowContract = new ethers.Contract(address, EscrowContract.abi, provider.getSigner());
+
+    let state = ContractState.Pending;
+    if (await escrowContract.isApproved()) {
+      state = ContractState.Approved;
+    }
+    if (await escrowContract.isExpired()) {
+      state = ContractState.Expired;
+    }
+
+    const escrow = {
+      address: escrowContract.address,
+      arbiter: await escrowContract.arbiter(),
+      beneficiary: await escrowContract.beneficiary(),
+      value: await provider.getBalance(escrowContract.address),
+      expiry: (await escrowContract.expiry()).toNumber(),
+      state,
+      handleApprove: async () => {
+        escrowContract.on("Approved", () => {
+          const arr = escrows.arr.map(esc => {
+            if (esc.address === escrowContract.address) {
+              esc.state = ContractState.Approved;
+            }
+            return esc;
+          });
+
+          setEscrows({ ...escrows, arr });
+        });
+
+        await approve(escrowContract, provider.getSigner());
+      },
+      handleCheckExpiry: async () => {
+        escrowContract.on("Expired", () => {
+          const arr = escrows.arr.map(esc => {
+            if (esc.address === escrowContract.address) {
+              esc.state = ContractState.Expired;
+            }
+            return esc;
+          });
+
+          setEscrows({ ...escrows, arr });
+
+        });
+
+        await validate(escrowContract, provider.getSigner());
+      },
+    };
+
+    const arr = escrows.arr;
+    arr.push(escrow);
+    setEscrows({ ...escrows, arr });
   }
 
   async function disconnectWallet() {
@@ -135,55 +233,8 @@ function App() {
     const beneficiary = document.getElementById("beneficiary").value;
     const arbiter = document.getElementById("arbiter").value;
     const value = ethers.utils.parseEther(document.getElementById("eth").value);
-    let expiry = parseInt(document.getElementById("expiry").value);
-
-    const escrowContract = await deploy(signer, arbiter, beneficiary, expiry === -1 ? 0 : expiry, value);
-
-    if (expiry !== -1) {
-      expiry += Date.now();
-    }
-
-    const escrow = {
-      address: escrowContract.address,
-      arbiter,
-      beneficiary,
-      value: value.toString(),
-      expiry,
-      state: ContractState.Pending,
-      handleApprove: async () => {
-        escrowContract.on("Approved", () => {
-          const arr = escrows.arr.map(esc => {
-            if (esc.address === escrowContract.address) {
-              esc.state = ContractState.Approved;
-            }
-            return esc;
-          });
-
-          setEscrows({ ...escrows, arr });
-        });
-
-        await approve(escrowContract, signer);
-      },
-      handleCheckExpiry: async () => {
-        escrowContract.on("Expired", () => {
-          const arr = escrows.arr.map(esc => {
-            if (esc.address === escrowContract.address) {
-              esc.state = ContractState.Expired;
-            }
-            return esc;
-          });
-
-          setEscrows({ ...escrows, arr });
-
-        });
-
-        await validate(escrowContract, signer);
-      },
-    };
-
-    const arr = escrows.arr;
-    arr.push(escrow);
-    setEscrows({ ...escrows, arr });
+    const expiry = parseInt(document.getElementById("expiry").value);
+    await deploy(factoryContract, arbiter, beneficiary, expiry, value);
   }
 
   return (
@@ -273,6 +324,7 @@ function App() {
                     e.preventDefault();
                     newContract();
                     handleClickOpenContractDialog();
+                    handleCloseContractDialog();
                   }}>Deploy
                 </Button>
               </DialogActions>
@@ -283,7 +335,7 @@ function App() {
                   (filter.all || escrow.arbiter.toLowerCase() === account.toLowerCase())
                   && ((filter.pending && escrow.state === ContractState.Pending)
                     || (!filter.pending && (escrow.state === ContractState.Approved || escrow.state === ContractState.Expired)))
-                  )
+                )
                   .map((escrow) => (
                     <Grid item key={"gridItem:" + escrow.address}>
                       <Escrow key={escrow.address} {...escrow} />
