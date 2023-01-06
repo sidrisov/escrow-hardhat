@@ -1,4 +1,6 @@
 const { ethers } = require('hardhat');
+const helpers = require('@nomicfoundation/hardhat-network-helpers');
+
 const { expect } = require('chai');
 
 describe('Escrow', function () {
@@ -20,10 +22,11 @@ describe('Escrow', function () {
         value: deposit,
       }
     );
+    // add 1 second due to block time adds 1 seconds
     contract2 = await Escrow.deploy(
       arbiter.getAddress(),
       beneficiary.getAddress(),
-      100,
+      1000 + 100,
       {
         value: deposit,
       }
@@ -55,6 +58,7 @@ describe('Escrow', function () {
 
   describe("after validate is called the flag shoudn't be set as expired if expiry 0", () => {
     it('should not expire', async () => {
+      await helpers.time.increase(1);
       await contract1.validate();
       expect(await contract1.isExpired()).eq(false);
     });
@@ -62,16 +66,14 @@ describe('Escrow', function () {
 
   describe("after validate is called the flag shoudn't be set as expired if expiry not 0 and time hasn't passed ", () => {
     it('should not expire', async () => {
-      await new Promise((r) => setTimeout(r, 50));
-
       await contract2.validate();
-      expect(await contract1.isExpired()).eq(false);
+      expect(await contract2.isExpired()).eq(false);
     });
   });
 
   describe("after validate is called the flag should set to be expired if time passed ", () => {
     it('should expire', async () => {
-      await new Promise((r) => setTimeout(r, 110));
+      await helpers.time.increase(1);
 
       await contract2.validate();
       expect(await contract2.isExpired()).eq(true);
@@ -80,10 +82,80 @@ describe('Escrow', function () {
 
   describe('after expiration approval should be reverted', () => {
     it('should revert', async () => {
-      await new Promise((r) => setTimeout(r, 110));
+      await helpers.time.increase(1);
 
       await contract2.validate();
       await expect(contract2.connect(arbiter).approve()).to.be.reverted;
+    });
+  });
+});
+
+describe('EscrowFactory', function () {
+  let factoryContract;
+  let depositor;
+  let beneficiary;
+  let arbiter;
+  const deposit = ethers.utils.parseEther('1');
+  let Escrow;
+  beforeEach(async () => {
+    depositor = ethers.provider.getSigner(0);
+    beneficiary = ethers.provider.getSigner(1);
+    arbiter = ethers.provider.getSigner(2);
+    const EscrowFactory = await ethers.getContractFactory('EscrowFactory');
+    factoryContract = await EscrowFactory.deploy();
+
+
+    await factoryContract.deployed();
+
+    Escrow = await ethers.getContractFactory('Escrow');
+
+    // every transaction will generate new block with 1 sec timestamp increase, thus, add 5 seconds
+    for (let i = 0; i < 5; i++) {
+      await factoryContract.create(
+        arbiter.getAddress(),
+        beneficiary.getAddress(),
+        5000 + 1 * (i + 1),
+        {
+          value: deposit,
+        }
+      );
+      
+      // every transaction increase
+      console.log(await helpers.time.latest());
+    }
+
+  });
+
+  describe('contracts should be created through factory', () => {
+    it('should be created', async function () {
+      const addresses = await factoryContract.getAddresses();
+      expect(addresses.length).to.eq(5);
+    });
+  });
+
+  describe("validate should not make any of contracts to be expired if time hasn't passed", () => {
+
+    it("shouldn't expire", async function () {
+
+      await factoryContract.validate();
+
+      const contracts = (await factoryContract.getAddresses()).map(address => Escrow.attach(address));
+
+      for (let i = 0; i < contracts.length; i++) {
+        expect(await contracts[i].isExpired()).eq(false);
+      }
+    });
+  });
+
+  describe("validate should make contracts to be expired if time passed", () => {
+
+    it("should expire", async function () {
+      const contracts = (await factoryContract.getAddresses()).map(address => Escrow.attach(address));
+      for (let i = 0; i < contracts.length; i++) {
+        await helpers.time.increase(1);
+        await factoryContract.validate();
+        expect(await contracts[i].isExpired()).eq(true);
+      }
     });
   });
 });

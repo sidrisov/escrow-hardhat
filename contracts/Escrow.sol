@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.17;
 
+//import "hardhat/console.sol";
+
 contract Escrow {
     address public arbiter;
     address public beneficiary;
@@ -27,7 +29,6 @@ contract Escrow {
     function approve() external {
         require(tx.origin == arbiter);
         require(!isExpired);
-
         uint balance = address(this).balance;
         (bool sent, ) = payable(beneficiary).call{value: balance}("");
         require(sent, "Failed to send Ether");
@@ -41,7 +42,6 @@ contract Escrow {
                 uint balance = address(this).balance;
                 (bool sent, ) = payable(depositor).call{value: balance}("");
                 require(sent, "Failed to send Ether");
-
                 emit Expired(address(this));
                 isExpired = true;
             }

@@ -96,7 +96,7 @@ function App() {
   const [escrows, setEscrows] = useState({ "arr": [] });
   const [account, setAccount] = useState();
   const [connected, setConnected] = useState(false);
-  const [factoryAddress, setFactoryAddress] = useState("0xC8Ec44A70291aCe21Bc0CBF6C2d5eCd07DF38e2D");
+  const [factoryAddress, setFactoryAddress] = useState("0xA8726C8DD8Dcb98A1eBeE37c1d8ABFba33D267dB");
   const [factoryContract, setFactoryContract] = useState();
   const [filter, setFilter] = useState({
     "pending": true,
@@ -160,7 +160,7 @@ function App() {
   }
 
   async function loadContract(address) {
-    console.log("lodaing contract: ", address);
+    console.log("loading contract: ", address);
 
     const escrowContract = new ethers.Contract(address, EscrowContract.abi, provider.getSigner());
 
